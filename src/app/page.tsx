@@ -1,10 +1,12 @@
 import Link from 'next/link'
 import { buttonVariants } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { TrendingUp, Shield, Bell, BarChart3 } from 'lucide-react'
+import { LogoMark } from '@/components/brand/logo-mark'
+import { CardPreviewMock } from '@/components/brand/card-preview-mock'
+import { Upload, Shield, Bell, BarChart3 } from 'lucide-react'
 
 const features = [
-  { icon: TrendingUp, title: 'Ekstre Takibi', desc: 'PDF ekstrelerinizi yükleyin, işlemler otomatik çıkarılsın.' },
+  { icon: Upload, title: 'Ekstre Takibi', desc: 'PDF ekstrelerinizi yükleyin, işlemler otomatik çıkarılsın.' },
   { icon: BarChart3, title: 'Kategori Analizi', desc: 'Market, yemek, ulaşım — harcama dağılımını görün.' },
   { icon: Bell, title: 'Ödeme Hatırlatma', desc: 'Son ödeme tarihi yaklaşınca Telegram ile uyarı alın.' },
   { icon: Shield, title: 'Güvenli Saklama', desc: 'Tam kart numarası saklanmaz, yalnızca son 4 hane.' },
@@ -23,7 +25,7 @@ export default function HomePage() {
             className="w-9 h-9 rounded-xl flex items-center justify-center"
             style={{ background: 'var(--blue-600)' }}
           >
-            <TrendingUp className="w-5 h-5 text-white" />
+            <LogoMark size={20} className="text-white" />
           </div>
           <span className="text-white font-semibold" style={{ fontFamily: 'var(--font-display)' }}>
             Ekstre Takip
@@ -42,6 +44,8 @@ export default function HomePage() {
               PDF yükle, işlemleri gör, ödeme tarihlerini kaçırma.
             </p>
           </div>
+
+          <CardPreviewMock />
 
           <div className="space-y-3">
             {features.map(({ icon: Icon, title, desc }) => (
@@ -73,7 +77,7 @@ export default function HomePage() {
               className="w-12 h-12 rounded-2xl flex items-center justify-center"
               style={{ background: 'var(--navy-900)' }}
             >
-              <TrendingUp className="w-6 h-6 text-white" />
+              <LogoMark size={24} className="text-white" />
             </div>
             <h1 className="text-xl font-bold" style={{ fontFamily: 'var(--font-display)' }}>Ekstre Takip</h1>
           </div>

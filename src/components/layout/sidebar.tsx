@@ -11,8 +11,8 @@ import {
   FileText,
   Settings,
   LogOut,
-  TrendingUp,
 } from 'lucide-react'
+import { LogoMark } from '@/components/brand/logo-mark'
 
 const navItems = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -44,7 +44,7 @@ export function Sidebar() {
             className="w-8 h-8 rounded-lg flex items-center justify-center"
             style={{ background: 'var(--blue-600)' }}
           >
-            <TrendingUp className="w-4 h-4 text-white" />
+            <LogoMark size={16} className="text-white" />
           </div>
           <div>
             <p className="text-white font-semibold text-sm leading-tight" style={{ fontFamily: 'var(--font-display)' }}>

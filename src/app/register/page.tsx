@@ -7,7 +7,8 @@ import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { TrendingUp, Eye, EyeOff } from 'lucide-react'
+import { Eye, EyeOff } from 'lucide-react'
+import { LogoMark } from '@/components/brand/logo-mark'
 
 export default function RegisterPage() {
   const router = useRouter()
@@ -43,7 +44,7 @@ export default function RegisterPage() {
             className="w-11 h-11 rounded-2xl flex items-center justify-center mb-3"
             style={{ background: 'var(--navy-900)' }}
           >
-            <TrendingUp className="w-5 h-5 text-white" />
+            <LogoMark size={20} className="text-white" />
           </div>
           <h1 className="text-xl font-bold text-slate-900" style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.02em' }}>
             Hesap oluşturun

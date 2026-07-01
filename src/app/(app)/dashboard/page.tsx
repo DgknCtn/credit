@@ -5,6 +5,7 @@ import { buttonVariants } from '@/components/ui/button'
 import { formatCurrency, getDaysUntil, formatDate, MONTH_NAMES } from '@/lib/utils-app'
 import { cn } from '@/lib/utils'
 import { FilterBar } from '@/components/dashboard/filter-bar'
+import { CategoryDonut } from '@/components/dashboard/category-donut'
 import { RecurringSpend, type RecurringItem } from '@/components/dashboard/recurring-spend'
 import { SpendTrend, type TrendPoint } from '@/components/dashboard/spend-trend'
 import { toOverridePattern } from '@/lib/categorize'
@@ -288,6 +289,7 @@ export default async function DashboardPage({
       {transactions.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Section title="Kategori Dağılımı">
+            <CategoryDonut data={categoryBreakdown} />
             <div className="py-2 space-y-3 pb-4">
               {categoryBreakdown.map(({ category, amount }) => {
                 const pct = categoryTotal > 0 ? (amount / categoryTotal) * 100 : 0

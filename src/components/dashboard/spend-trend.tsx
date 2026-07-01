@@ -1,36 +1,44 @@
+'use client'
+
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 import { formatCurrency, MONTH_NAMES } from '@/lib/utils-app'
 
 export type TrendPoint = { month: number; year: number; total: number }
 
 export function SpendTrend({ data }: { data: TrendPoint[] }) {
-  const max = Math.max(...data.map((d) => d.total), 1)
+  const chartData = data.map((d) => ({
+    label: `${MONTH_NAMES[d.month - 1].slice(0, 3)} ${String(d.year).slice(2)}`,
+    total: d.total,
+  }))
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-      <h2 className="text-sm font-semibold text-slate-800 mb-5" style={{ fontFamily: 'var(--font-display)' }}>
+      <h2 className="text-sm font-semibold text-slate-800 mb-4" style={{ fontFamily: 'var(--font-display)' }}>
         Son 6 Ay Harcama Trendi
       </h2>
-      <div className="flex items-end gap-3 h-32">
-        {data.map((d) => {
-          const heightPct = d.total > 0 ? Math.max((d.total / max) * 100, 4) : 0
-          return (
-            <div key={`${d.month}-${d.year}`} className="flex-1 flex flex-col items-center justify-end h-full">
-              <p className="text-[10px] tabular-nums mb-1" style={{ color: 'var(--slate-500)' }}>
-                {d.total > 0 ? formatCurrency(d.total).replace(/\s*TL$/, '') : ''}
-              </p>
-              <div className="w-full flex items-end h-full">
-                <div
-                  className="w-full rounded-t-md transition-all"
-                  style={{ height: `${heightPct}%`, background: d.total > 0 ? 'var(--blue-500)' : 'var(--slate-100)' }}
-                />
-              </div>
-              <p className="text-[10px] mt-1.5" style={{ color: 'var(--slate-400)' }}>
-                {MONTH_NAMES[d.month - 1].slice(0, 3)}
-              </p>
-            </div>
-          )
-        })}
-      </div>
+      <ResponsiveContainer width="100%" height={180}>
+        <BarChart data={chartData} margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>
+          <CartesianGrid vertical={false} stroke="var(--slate-100)" />
+          <XAxis
+            dataKey="label"
+            tick={{ fontSize: 11, fill: 'var(--slate-400)' }}
+            axisLine={{ stroke: 'var(--slate-200)' }}
+            tickLine={false}
+          />
+          <YAxis hide />
+          <Tooltip
+            cursor={{ fill: 'var(--slate-50)' }}
+            formatter={(value) => [formatCurrency(Number(value)), 'Toplam']}
+            contentStyle={{
+              border: '1px solid var(--slate-200)',
+              borderRadius: 10,
+              fontSize: 12,
+              boxShadow: '0 4px 12px rgba(0,0,0,0.06)',
+            }}
+          />
+          <Bar dataKey="total" fill="var(--blue-500)" radius={[6, 6, 0, 0]} maxBarSize={40} />
+        </BarChart>
+      </ResponsiveContainer>
     </div>
   )
 }
