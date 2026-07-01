@@ -37,7 +37,7 @@ const RULES: Rule[] = [
   {
     category: 'Abonelik',
     keywords: [
-      'netflix', 'spotify', 'youtube', 'apple.com/bill', 'google play',
+      'netflix', 'spotify', 'youtube', 'apple.com/bill', 'google play', 'ty plus',
       'amazon prime', 'exxen', 'blutv', 'gain', 'icloud', 'disney+', 'playstation',
       'xbox', 'chatgpt', 'openai', 'claude.ai', 'anthropic',
     ],

@@ -47,13 +47,25 @@ const START_ANCHORED_AMOUNT_RE = /^(.*?)([+-])?(\d{1,3}(?:\.\d{3})*,\d{2})/
 // "15.499,00 TL'lik işlemin 5 / 6 taksidi"
 const YAPIKREDI_INSTALLMENT_RE = /^[\d.]+,\d{2}\s*TL'lik\s*işlemin\s*(\d+)\s*\/\s*(\d+)\s*taksidi/i
 
+// Halkbank/Paraf-style: amount is the first number after the merchant name,
+// same position as Yapı Kredi, but printed in international notation
+// (comma-thousands, dot-decimal — e.g. "15,674.80") instead of Turkish.
+const HALKBANK_AMOUNT_RE = /^(.*?)([+-])?(\d{1,3}(?:,\d{3})*\.\d{2})/
+
+// Format-agnostic amount matcher used for header fields (Dönem Borcu, Asgari
+// Tutar, ...) where either notation can appear depending on the bank. The
+// group boundaries guarantee the separator immediately before the final two
+// digits is the decimal one, regardless of which character it is.
+const ANY_AMOUNT_RE = /\d{1,3}(?:[.,]\d{3})*[.,]\d{2}/
+
 const HEADER_SKIP_RE = /^(sayfa|page|toplam|ara\s*toplam|devir|bakiye|iban|müşteri|musteri|hesap\s*no|ekstre\s*no|ekstre\s*sayfası)/i
 
-type BankFormat = 'bonus' | 'yapikredi' | 'generic'
+type BankFormat = 'bonus' | 'yapikredi' | 'halkbank' | 'generic'
 
 function detectBankFormat(text: string): BankFormat {
   if (/worldpuan|yapı\s*(ve\s*)?kredi\s*bankası|İşlem\s*Tarihi\s*İşlemler\s*Tutar/i.test(text)) return 'yapikredi'
   if (/bonus\s*(program|trink)|garanti\s*bbva/i.test(text)) return 'bonus'
+  if (/parafpara|paraf\.com\.tr|halk\s*bank/i.test(text)) return 'halkbank'
   return 'generic'
 }
 
@@ -72,6 +84,16 @@ function toIsoDate(dd: string, month: number, yyyy: string): string {
 
 function parseAmount(raw: string): number {
   return Number(raw.replace(/\./g, '').replace(',', '.'))
+}
+
+// The decimal separator is always the one immediately before the final two
+// digits (guaranteed by ANY_AMOUNT_RE's structure), regardless of whether
+// it's a comma (Turkish) or a dot (international) — every other separator
+// in the string is a thousands grouping and gets stripped.
+function parseAnyAmount(raw: string): number {
+  const decimals = raw.slice(-2)
+  const integerPart = raw.slice(0, -3).replace(/[.,]/g, '')
+  return Number(`${integerPart}.${decimals}`)
 }
 
 // Turkish banks export dates either numerically ("20.06.2026") or spelled out
@@ -96,7 +118,7 @@ function matchTransactionLine(line: string): LineDate | null {
     if (month) return { day: textMatch[1], month, year: textMatch[3], rest: textMatch[4] }
   }
 
-  const numericMatch = line.match(new RegExp(`^${NUMERIC_DATE_RE.source}\\s+(.+)$`))
+  const numericMatch = line.match(new RegExp(`^${NUMERIC_DATE_RE.source}\\s*(.+)$`))
   if (numericMatch) {
     return { day: numericMatch[1], month: Number(numericMatch[2]), year: numericMatch[3], rest: numericMatch[4] }
   }
@@ -139,11 +161,11 @@ export function parseStatementText(text: string): ParsedStatement {
 
     if (
       statement_total === null &&
-      /(toplam\s*bor[çc]|d[öo]nem\s*bor[çc]u|hesap\s*[öo]zeti\s*tutar[ıi]?)/i.test(line)
+      /(toplam\s*bor[çc]|d[öo]nem\s*bor[çc]u|hesap\s*[öo]zeti\s*tutar[ıi]?|hesap\s*bakiyesi)/i.test(line)
     ) {
-      const m = lookahead.match(/(\d{1,3}(?:\.\d{3})*,\d{2})/)
+      const m = lookahead.match(ANY_AMOUNT_RE)
       if (m) {
-        statement_total = parseAmount(m[1])
+        statement_total = parseAnyAmount(m[0])
         continue
       }
     }
@@ -152,9 +174,9 @@ export function parseStatementText(text: string): ParsedStatement {
       minimum_payment === null &&
       /(asgari\s*[öo]deme|asgari\s*tutar|min\.?\s*[öo]deme)/i.test(line)
     ) {
-      const m = lookahead.match(/(\d{1,3}(?:\.\d{3})*,\d{2})/)
+      const m = lookahead.match(ANY_AMOUNT_RE)
       if (m) {
-        minimum_payment = parseAmount(m[1])
+        minimum_payment = parseAnyAmount(m[0])
         continue
       }
     }
@@ -198,6 +220,12 @@ export function parseStatementText(text: string): ParsedStatement {
       if (nextLineInstallment) {
         installment_info = `${nextLineInstallment[1]}/${nextLineInstallment[2]}`
       }
+    } else if (format === 'halkbank') {
+      const m = dateMatch.rest.match(HALKBANK_AMOUNT_RE)
+      if (!m) continue
+      description = cleanDescription(m[1])
+      sign = m[2]
+      amountRaw = m[3]
     } else {
       const tailMatch = dateMatch.rest.match(END_ANCHORED_AMOUNT_RE)
       if (!tailMatch) continue
@@ -212,7 +240,7 @@ export function parseStatementText(text: string): ParsedStatement {
 
     if (!description || description.length < 2) continue
 
-    const magnitude = parseAmount(amountRaw)
+    const magnitude = format === 'halkbank' ? parseAnyAmount(amountRaw) : parseAmount(amountRaw)
     if (Number.isNaN(magnitude) || magnitude === 0) continue
     const amount = sign ? -Math.abs(magnitude) : magnitude
 
