@@ -15,7 +15,7 @@ const RULES: Rule[] = [
     category: 'Yemek',
     keywords: [
       'yemeksepeti', 'getir yemek', 'trendyol yemek', 'restoran', 'restaurant',
-      'cafe', 'kafe', 'kahve', 'starbucks', 'burger', 'pizza', 'lokanta', 'kebap',
+      'cafe', 'kafe', 'kahve', 'starbucks', 'burger', 'pizza', 'domino', 'lokanta', 'kebap',
       'kokoreç', 'fırın', 'firin', 'ekmek', 'pastane', 'bakery', 'simit',
     ],
   },
@@ -23,7 +23,7 @@ const RULES: Rule[] = [
     category: 'Ulaşım',
     keywords: [
       'shell', 'opet', 'bp ', 'petrol ofisi', 'total ', 'akaryakıt', 'otopark',
-      'ist card', 'istanbulkart', 'metro istanbul', 'taksi', 'bitaksi', 'uber',
+      'ist card', 'istanbulkart', 'metro istanbul', 'ego kart', 'taksi', 'bitaksi', 'uber',
       'havaş', 'otoyol', 'hgs', 'ogs',
     ],
   },

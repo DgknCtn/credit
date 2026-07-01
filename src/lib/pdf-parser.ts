@@ -26,18 +26,36 @@ const TURKISH_MONTHS: Record<string, number> = {
   ekim: 10, kasım: 11, kasim: 11, aralık: 12, aralik: 12,
 }
 
-const NUMERIC_DATE_RE = /(\d{2})[.\/](\d{2})[.\/](\d{2,4})/
-const TEXT_DATE_RE = /(\d{2})\s+([A-Za-zÇĞİÖŞÜçğıöşü]+)\s+(\d{4})/
+const NUMERIC_DATE_RE = /(\d{1,2})[.\/](\d{1,2})[.\/](\d{2,4})/
+const TEXT_DATE_RE = /(\d{1,2})\s+([A-Za-zÇĞİÖŞÜçğıöşü]+)\s+(\d{4})/
 
-// Tail of a transaction line: an optional small "bonus" figure glued directly
-// onto the real amount with no separator (some banks — e.g. Garanti Bonus —
-// concatenate table columns with no whitespace), then the amount itself, then
-// an optional +/- suffix marking a payment/credit rather than a purchase.
-const AMOUNT_TAIL_RE = /(?:\d{1,2},\d{2})?(-?\d{1,3}(?:\.\d{3})*,\d{2})\s*([+-])?\s*$/
+// Bonus/Garanti-style tail: an optional small "bonus" figure glued directly
+// onto the real amount with no separator, then the amount, then an optional
+// +/- suffix marking a payment/credit rather than a purchase.
+const END_ANCHORED_AMOUNT_RE = /(?:\d{1,2},\d{2})?(-?\d{1,3}(?:\.\d{3})*,\d{2})\s*([+-])?\s*$/
 
-// Installment breakdown glued into the description, e.g.
+// Bonus-style installment breakdown glued into the description, e.g.
 // "1.932,83x6=11.597,00 2.Taksit" (per-installment x count = total, current.Taksit)
-const INSTALLMENT_RE = /\d[\d.]*,\d{2}x(\d+)=[\d.]+,\d{2}\s*(\d+)\.Taksit/i
+const BONUS_INSTALLMENT_RE = /\d[\d.]*,\d{2}x(\d+)=[\d.]+,\d{2}\s*(\d+)\.Taksit/i
+
+// Yapı Kredi (Worldcard/Play)-style: amount is the FIRST number after the
+// merchant name, optionally prefixed with +/-; anything after (remaining
+// balance / puan columns) is glued on with no separator and discarded.
+const START_ANCHORED_AMOUNT_RE = /^(.*?)([+-])?(\d{1,3}(?:\.\d{3})*,\d{2})/
+
+// Yapı Kredi installment detail appears on the line *after* the transaction:
+// "15.499,00 TL'lik işlemin 5 / 6 taksidi"
+const YAPIKREDI_INSTALLMENT_RE = /^[\d.]+,\d{2}\s*TL'lik\s*işlemin\s*(\d+)\s*\/\s*(\d+)\s*taksidi/i
+
+const HEADER_SKIP_RE = /^(sayfa|page|toplam|ara\s*toplam|devir|bakiye|iban|müşteri|musteri|hesap\s*no|ekstre\s*no|ekstre\s*sayfası)/i
+
+type BankFormat = 'bonus' | 'yapikredi' | 'generic'
+
+function detectBankFormat(text: string): BankFormat {
+  if (/worldpuan|yapı\s*(ve\s*)?kredi\s*bankası|İşlem\s*Tarihi\s*İşlemler\s*Tutar/i.test(text)) return 'yapikredi'
+  if (/bonus\s*(program|trink)|garanti\s*bbva/i.test(text)) return 'bonus'
+  return 'generic'
+}
 
 function normalizeYear(y: string): number {
   const n = Number(y)
@@ -57,16 +75,15 @@ function parseAmount(raw: string): number {
 }
 
 // Turkish banks export dates either numerically ("20.06.2026") or spelled out
-// ("20 Haziran 2026"). Tries both.
-function extractDate(line: string): string | null {
-  const numeric = line.match(NUMERIC_DATE_RE)
-  if (numeric) return toIsoDate(numeric[1], Number(numeric[2]), numeric[3])
-
-  const text = line.match(TEXT_DATE_RE)
-  if (text) {
-    const month = TURKISH_MONTHS[normalizeMonthName(text[2])]
-    if (month) return toIsoDate(text[1], month, text[3])
+// ("20 Haziran 2026" / "3 Haziran 2026").
+function extractDate(text: string): string | null {
+  const textMatch = text.match(TEXT_DATE_RE)
+  if (textMatch) {
+    const month = TURKISH_MONTHS[normalizeMonthName(textMatch[2])]
+    if (month) return toIsoDate(textMatch[1], month, textMatch[3])
   }
+  const numeric = text.match(NUMERIC_DATE_RE)
+  if (numeric) return toIsoDate(numeric[1], Number(numeric[2]), numeric[3])
   return null
 }
 
@@ -87,12 +104,20 @@ function matchTransactionLine(line: string): LineDate | null {
   return null
 }
 
+function cleanDescription(raw: string): string {
+  return raw
+    .replace(/\d{1,3}(?:\.\d{3})*,\d{2}\s*(TL|USD|EUR)?\s*$/i, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+}
+
 export async function extractPdfText(buffer: Buffer): Promise<string> {
   const result = await pdfParse(buffer)
   return result.text
 }
 
 export function parseStatementText(text: string): ParsedStatement {
+  const format = detectBankFormat(text)
   const lines = text
     .split('\n')
     .map((l) => l.trim())
@@ -105,20 +130,29 @@ export function parseStatementText(text: string): ParsedStatement {
   let period_month: number | null = null
   let period_year: number | null = null
 
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    // Some banks split "Hesap Kesim Tarihi" / ":" / "14 Haziran 2026" across
+    // separate lines — look a couple of lines ahead when the value isn't
+    // inline with the label.
+    const lookahead = [line, lines[i + 1], lines[i + 2]].filter(Boolean).join(' ')
+
     if (
       statement_total === null &&
       /(toplam\s*bor[çc]|d[öo]nem\s*bor[çc]u|hesap\s*[öo]zeti\s*tutar[ıi]?)/i.test(line)
     ) {
-      const m = line.match(/(\d{1,3}(?:\.\d{3})*,\d{2})/)
+      const m = lookahead.match(/(\d{1,3}(?:\.\d{3})*,\d{2})/)
       if (m) {
         statement_total = parseAmount(m[1])
         continue
       }
     }
 
-    if (minimum_payment === null && /(asgari\s*[öo]deme|min\.?\s*[öo]deme)/i.test(line)) {
-      const m = line.match(/(\d{1,3}(?:\.\d{3})*,\d{2})/)
+    if (
+      minimum_payment === null &&
+      /(asgari\s*[öo]deme|asgari\s*tutar|min\.?\s*[öo]deme)/i.test(line)
+    ) {
+      const m = lookahead.match(/(\d{1,3}(?:\.\d{3})*,\d{2})/)
       if (m) {
         minimum_payment = parseAmount(m[1])
         continue
@@ -126,7 +160,7 @@ export function parseStatementText(text: string): ParsedStatement {
     }
 
     if (due_date === null && /son\s*[öo]deme\s*tarih/i.test(line)) {
-      const d = extractDate(line)
+      const d = extractDate(lookahead)
       if (d) {
         due_date = d
         continue
@@ -134,7 +168,7 @@ export function parseStatementText(text: string): ParsedStatement {
     }
 
     if (period_month === null && /hesap\s*kesim\s*tarih/i.test(line)) {
-      const d = extractDate(line)
+      const d = extractDate(lookahead)
       if (d) {
         const [y, m] = d.split('-')
         period_year = Number(y)
@@ -143,27 +177,38 @@ export function parseStatementText(text: string): ParsedStatement {
       }
     }
 
-    if (/^(sayfa|page|toplam|ara\s*toplam|devir|bakiye|iban|müşteri|musteri|hesap\s*no|ekstre\s*no|ekstre\s*sayfası)/i.test(line)) {
-      continue
-    }
+    if (HEADER_SKIP_RE.test(line)) continue
 
     const dateMatch = matchTransactionLine(line)
     if (!dateMatch) continue
 
-    const tailMatch = dateMatch.rest.match(AMOUNT_TAIL_RE)
-    if (!tailMatch) continue
+    let description: string
+    let amountRaw: string
+    let sign: string | undefined
+    let installment_info: string | null = null
 
-    const amountRaw = tailMatch[1]
-    const sign = tailMatch[2]
-    const beforeTail = dateMatch.rest.slice(0, dateMatch.rest.length - tailMatch[0].length)
+    if (format === 'yapikredi') {
+      const m = dateMatch.rest.match(START_ANCHORED_AMOUNT_RE)
+      if (!m) continue
+      description = cleanDescription(m[1]).replace(/\s+[A-ZÇĞİÖŞÜ]{2,3}\s*$/, '').trim()
+      sign = m[2]
+      amountRaw = m[3]
 
-    const installmentMatch = beforeTail.match(INSTALLMENT_RE)
-    const installment_info = installmentMatch ? `${installmentMatch[2]}/${installmentMatch[1]}` : null
+      const nextLineInstallment = lines[i + 1]?.match(YAPIKREDI_INSTALLMENT_RE)
+      if (nextLineInstallment) {
+        installment_info = `${nextLineInstallment[1]}/${nextLineInstallment[2]}`
+      }
+    } else {
+      const tailMatch = dateMatch.rest.match(END_ANCHORED_AMOUNT_RE)
+      if (!tailMatch) continue
+      amountRaw = tailMatch[1]
+      sign = tailMatch[2]
+      const beforeTail = dateMatch.rest.slice(0, dateMatch.rest.length - tailMatch[0].length)
 
-    const description = (installmentMatch ? beforeTail.replace(INSTALLMENT_RE, '') : beforeTail)
-      .replace(/\d{1,3}(?:\.\d{3})*,\d{2}\s*(TL|USD|EUR)?\s*$/i, '')
-      .replace(/\s{2,}/g, ' ')
-      .trim()
+      const installmentMatch = beforeTail.match(BONUS_INSTALLMENT_RE)
+      installment_info = installmentMatch ? `${installmentMatch[2]}/${installmentMatch[1]}` : null
+      description = cleanDescription(installmentMatch ? beforeTail.replace(BONUS_INSTALLMENT_RE, '') : beforeTail)
+    }
 
     if (!description || description.length < 2) continue
 
