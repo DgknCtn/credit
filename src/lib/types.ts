@@ -67,3 +67,12 @@ export type NotificationSettings = {
   created_at: string
   updated_at: string
 }
+
+export type CategoryBudget = {
+  id: string
+  user_id: string
+  category: string
+  monthly_limit: number
+  created_at: string
+  updated_at: string
+}

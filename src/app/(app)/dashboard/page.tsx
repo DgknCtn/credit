@@ -4,35 +4,58 @@ import Link from 'next/link'
 import { buttonVariants } from '@/components/ui/button'
 import { formatCurrency, getDaysUntil, formatDate, MONTH_NAMES } from '@/lib/utils-app'
 import { cn } from '@/lib/utils'
+import { FilterBar } from '@/components/dashboard/filter-bar'
+import { RecurringSpend, type RecurringItem } from '@/components/dashboard/recurring-spend'
+import { SpendTrend, type TrendPoint } from '@/components/dashboard/spend-trend'
+import { toOverridePattern } from '@/lib/categorize'
 import { CreditCard, ArrowUpRight, AlertCircle, Plus, TrendingUp, TrendingDown, Minus } from 'lucide-react'
 
-export default async function DashboardPage() {
+type SearchParams = { month?: string; year?: string; card?: string }
+
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<SearchParams>
+}) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
+  const sp = await searchParams
   const now = new Date()
-  const currentMonth = now.getMonth() + 1
-  const currentYear = now.getFullYear()
-  const prevMonth = currentMonth === 1 ? 12 : currentMonth - 1
-  const prevYear = currentMonth === 1 ? currentYear - 1 : currentYear
+  const selectedMonth = Number(sp.month) || now.getMonth() + 1
+  const selectedYear = Number(sp.year) || now.getFullYear()
+  const selectedCardId = sp.card || null
+  const prevMonth = selectedMonth === 1 ? 12 : selectedMonth - 1
+  const prevYear = selectedMonth === 1 ? selectedYear - 1 : selectedYear
 
-  const [{ data: cards }, { data: statements }] = await Promise.all([
+  const [{ data: cards }, { data: statements }, { data: budgets }] = await Promise.all([
     supabase.from('cards').select('*').eq('is_active', true).order('created_at'),
     supabase
       .from('statements')
       .select('*, card:cards(bank_name, card_name, last_four_digits)')
       .eq('processing_status', 'completed')
-      .gte('period_year', prevYear)
+      .gte('period_year', Math.min(prevYear, selectedYear) - 1)
       .order('due_date', { ascending: true }),
+    supabase.from('category_budgets').select('category, monthly_limit').eq('user_id', user.id),
   ])
 
-  const allStatements = statements ?? []
+  const budgetByCategory = new Map((budgets ?? []).map((b) => [b.category, b.monthly_limit]))
 
-  const currentMonthStatements = allStatements.filter(
-    (s) => s.period_month === currentMonth && s.period_year === currentYear
+  const allStatements = statements ?? []
+  const cardFilteredStatements = selectedCardId
+    ? allStatements.filter((s) => s.card_id === selectedCardId)
+    : allStatements
+
+  const currentMonthStatements = cardFilteredStatements.filter(
+    (s) => s.period_month === selectedMonth && s.period_year === selectedYear
   )
-  const prevMonthStatements = allStatements.filter(
+  // Unfiltered by card, so every card's own period statement shows up correctly
+  // in the per-card list even when the dashboard is scoped to a single card.
+  const currentPeriodAllCardStatements = allStatements.filter(
+    (s) => s.period_month === selectedMonth && s.period_year === selectedYear
+  )
+  const prevMonthStatements = cardFilteredStatements.filter(
     (s) => s.period_month === prevMonth && s.period_year === prevYear
   )
 
@@ -42,7 +65,7 @@ export default async function DashboardPage() {
     ? ((totalThisMonth - totalLastMonth) / totalLastMonth) * 100
     : null
 
-  const upcomingPayments = allStatements.filter((s) => {
+  const upcomingPayments = cardFilteredStatements.filter((s) => {
     if (!s.due_date) return false
     const days = getDaysUntil(s.due_date)
     return days >= 0 && days <= 14
@@ -77,20 +100,102 @@ export default async function DashboardPage() {
     .sort((a, b) => b.amount - a.amount)
     .slice(0, 10)
 
+  // Recurring spend: same merchant appearing in 2+ of the last 6 periods.
+  const recentPeriods: { month: number; year: number }[] = []
+  let rm = selectedMonth
+  let ry = selectedYear
+  for (let i = 0; i < 6; i++) {
+    recentPeriods.push({ month: rm, year: ry })
+    rm -= 1
+    if (rm === 0) { rm = 12; ry -= 1 }
+  }
+  const recentPeriodKeys = new Set(recentPeriods.map((p) => `${p.month}-${p.year}`))
+  const recentStatements = cardFilteredStatements.filter((s) => recentPeriodKeys.has(`${s.period_month}-${s.period_year}`))
+  const recentStatementIds = recentStatements.map((s) => s.id)
+  const periodByStatementId = new Map(recentStatements.map((s) => [s.id, { month: s.period_month, year: s.period_year }]))
+
+  const { data: recentTransactions } = recentStatementIds.length
+    ? await supabase.from('transactions').select('*').in('statement_id', recentStatementIds)
+    : { data: [] }
+
+  type Occurrence = { periodKey: string; month: number; year: number; amount: number; currency: string; category: string; description: string }
+  const merchantOccurrences = new Map<string, Occurrence[]>()
+  for (const t of recentTransactions ?? []) {
+    if (t.amount <= 0) continue
+    const period = periodByStatementId.get(t.statement_id)
+    if (!period) continue
+    const key = toOverridePattern(t.description)
+    const periodKey = `${period.month}-${period.year}`
+    const list = merchantOccurrences.get(key) ?? []
+    if (!list.some((o) => o.periodKey === periodKey)) {
+      list.push({ periodKey, month: period.month, year: period.year, amount: t.amount, currency: t.currency, category: t.category, description: t.description })
+    }
+    merchantOccurrences.set(key, list)
+  }
+
+  const recurringItems: RecurringItem[] = Array.from(merchantOccurrences.entries())
+    .filter(([, occ]) => occ.length >= 2)
+    .map(([key, occ]) => {
+      const sorted = occ.slice().sort((a, b) => (a.year - b.year) || (a.month - b.month))
+      const latest = sorted[sorted.length - 1]
+      const previous = sorted.length >= 2 ? sorted[sorted.length - 2] : null
+      const deltaPercent = previous && previous.amount > 0
+        ? ((latest.amount - previous.amount) / previous.amount) * 100
+        : null
+      return {
+        key,
+        description: latest.description,
+        category: latest.category,
+        periodsSeen: sorted.length,
+        lastAmount: latest.amount,
+        currency: latest.currency,
+        previousAmount: previous?.amount ?? null,
+        deltaPercent,
+      }
+    })
+    .sort((a, b) => b.periodsSeen - a.periodsSeen || b.lastAmount - a.lastAmount)
+
+  const trendData: TrendPoint[] = recentPeriods
+    .slice()
+    .reverse()
+    .map((p) => ({
+      month: p.month,
+      year: p.year,
+      total: recentStatements
+        .filter((s) => s.period_month === p.month && s.period_year === p.year)
+        .reduce((sum, s) => sum + (s.statement_total ?? 0), 0),
+    }))
+
+  const budgetProgress = Array.from(budgetByCategory.entries())
+    .map(([category, limit]) => ({
+      category,
+      limit,
+      spent: categoryBreakdown.find((c) => c.category === category)?.amount ?? 0,
+    }))
+    .sort((a, b) => b.spent / b.limit - a.spent / a.limit)
+
   return (
     <div className="space-y-8">
       {/* Header */}
-      <div className="flex items-start justify-between">
+      <div className="flex items-start justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">
-            {MONTH_NAMES[currentMonth - 1]} {currentYear}
+            {MONTH_NAMES[selectedMonth - 1]} {selectedYear}
           </h1>
           <p className="text-sm text-slate-500 mt-0.5">Finansal genel bakış</p>
         </div>
-        <Link href="/statements/upload" className={cn(buttonVariants(), 'gap-2')}>
-          <Plus className="w-4 h-4" />
-          Ekstre Yükle
-        </Link>
+        <div className="flex items-center gap-3 flex-wrap">
+          <FilterBar
+            cards={cards ?? []}
+            selectedMonth={selectedMonth}
+            selectedYear={selectedYear}
+            selectedCardId={selectedCardId}
+          />
+          <Link href="/statements/upload" className={cn(buttonVariants(), 'gap-2')}>
+            <Plus className="w-4 h-4" />
+            Ekstre Yükle
+          </Link>
+        </div>
       </div>
 
       {/* Urgent alert */}
@@ -176,6 +281,9 @@ export default async function DashboardPage() {
         </Section>
       )}
 
+      {/* Multi-month trend */}
+      {recentStatements.length > 0 && <SpendTrend data={trendData} />}
+
       {/* Category breakdown + top transactions */}
       {transactions.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -214,8 +322,37 @@ export default async function DashboardPage() {
               ))}
             </div>
           </Section>
+
+          {budgetProgress.length > 0 && (
+            <Section title="Bütçe Durumu">
+              <div className="py-2 space-y-3 pb-4">
+                {budgetProgress.map(({ category, limit, spent }) => {
+                  const pct = limit > 0 ? Math.min((spent / limit) * 100, 100) : 0
+                  const over = spent > limit
+                  return (
+                    <div key={category}>
+                      <div className="flex items-center justify-between mb-1">
+                        <p className="text-sm font-medium text-slate-700">{category}</p>
+                        <p className="text-sm tabular-nums font-semibold" style={{ color: over ? 'var(--red-600)' : 'var(--slate-900)' }}>
+                          {formatCurrency(spent)} / {formatCurrency(limit)}
+                        </p>
+                      </div>
+                      <div className="h-1.5 rounded-full" style={{ background: 'var(--slate-100)' }}>
+                        <div
+                          className="h-1.5 rounded-full"
+                          style={{ width: `${pct}%`, background: over ? 'var(--red-600)' : 'var(--blue-500)' }}
+                        />
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </Section>
+          )}
         </div>
       )}
+
+      <RecurringSpend items={recurringItems} />
 
       {/* Cards with this month totals */}
       {hasCards && (
@@ -225,7 +362,7 @@ export default async function DashboardPage() {
         >
           <div className="divide-y divide-slate-100">
             {cards!.map((card) => {
-              const stmt = currentMonthStatements.find(s => s.card_id === card.id)
+              const stmt = currentPeriodAllCardStatements.find(s => s.card_id === card.id)
               return (
                 <div key={card.id} className="flex items-center justify-between py-3.5 px-1">
                   <div className="flex items-center gap-3">
