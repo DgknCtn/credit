@@ -60,7 +60,9 @@ export function CardForm({ card }: Props) {
       if (error) { toast.error('Güncelleme başarısız.'); setLoading(false); return }
       toast.success('Kart güncellendi.')
     } else {
-      const { error } = await supabase.from('cards').insert(payload)
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) { toast.error('Oturum bulunamadı, tekrar giriş yapın.'); setLoading(false); return }
+      const { error } = await supabase.from('cards').insert({ ...payload, user_id: user.id })
       if (error) { toast.error('Kart eklenemedi.'); setLoading(false); return }
       toast.success('Kart eklendi.')
     }

@@ -20,36 +20,71 @@ export type ParsedStatement = {
   raw_text_length: number
 }
 
-const DATE_RE = /(\d{2})[.\/](\d{2})[.\/](\d{2,4})/
-const AMOUNT_RE = /(-?\d{1,3}(?:\.\d{3})*,\d{2})\s*(TL|TRY|USD|EUR|\$|€)?/
-const INSTALLMENT_RE = /(\d{1,2})\s*[\/\\]\s*(\d{1,2})\s*(?:TAKS[İI]T)?|TAKS[İI]T\s*[:.]?\s*(\d{1,2})\s*[\/\\]\s*(\d{1,2})/i
+const TURKISH_MONTHS: Record<string, number> = {
+  ocak: 1, şubat: 2, subat: 2, mart: 3, nisan: 4, mayıs: 5, mayis: 5,
+  haziran: 6, temmuz: 7, ağustos: 8, agustos: 8, eylül: 9, eylul: 9,
+  ekim: 10, kasım: 11, kasim: 11, aralık: 12, aralik: 12,
+}
 
-// A transaction line: date, description, amount (optionally with currency), at line end.
-const LINE_RE = new RegExp(
-  `^\\s*${DATE_RE.source}\\s+(.+?)\\s+${AMOUNT_RE.source}\\s*$`
-)
+const NUMERIC_DATE_RE = /(\d{2})[.\/](\d{2})[.\/](\d{2,4})/
+const TEXT_DATE_RE = /(\d{2})\s+([A-Za-zÇĞİÖŞÜçğıöşü]+)\s+(\d{4})/
+
+// Tail of a transaction line: an optional small "bonus" figure glued directly
+// onto the real amount with no separator (some banks — e.g. Garanti Bonus —
+// concatenate table columns with no whitespace), then the amount itself, then
+// an optional +/- suffix marking a payment/credit rather than a purchase.
+const AMOUNT_TAIL_RE = /(?:\d{1,2},\d{2})?(-?\d{1,3}(?:\.\d{3})*,\d{2})\s*([+-])?\s*$/
+
+// Installment breakdown glued into the description, e.g.
+// "1.932,83x6=11.597,00 2.Taksit" (per-installment x count = total, current.Taksit)
+const INSTALLMENT_RE = /\d[\d.]*,\d{2}x(\d+)=[\d.]+,\d{2}\s*(\d+)\.Taksit/i
 
 function normalizeYear(y: string): number {
   const n = Number(y)
   return n < 100 ? 2000 + n : n
 }
 
-function toIsoDate(dd: string, mm: string, yyyy: string): string {
-  const year = normalizeYear(yyyy)
-  return `${year}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`
+function normalizeMonthName(raw: string): string {
+  return raw.toLocaleLowerCase('tr-TR').replace(/i̇/g, 'i')
+}
+
+function toIsoDate(dd: string, month: number, yyyy: string): string {
+  return `${normalizeYear(yyyy)}-${String(month).padStart(2, '0')}-${dd.padStart(2, '0')}`
 }
 
 function parseAmount(raw: string): number {
   return Number(raw.replace(/\./g, '').replace(',', '.'))
 }
 
-function normalizeCurrency(raw?: string): string {
-  if (!raw) return 'TRY'
-  const r = raw.toUpperCase()
-  if (r === 'TL' || r === 'TRY') return 'TRY'
-  if (r === '$') return 'USD'
-  if (r === '€') return 'EUR'
-  return r
+// Turkish banks export dates either numerically ("20.06.2026") or spelled out
+// ("20 Haziran 2026"). Tries both.
+function extractDate(line: string): string | null {
+  const numeric = line.match(NUMERIC_DATE_RE)
+  if (numeric) return toIsoDate(numeric[1], Number(numeric[2]), numeric[3])
+
+  const text = line.match(TEXT_DATE_RE)
+  if (text) {
+    const month = TURKISH_MONTHS[normalizeMonthName(text[2])]
+    if (month) return toIsoDate(text[1], month, text[3])
+  }
+  return null
+}
+
+type LineDate = { day: string; month: number; year: string; rest: string }
+
+function matchTransactionLine(line: string): LineDate | null {
+  const textMatch = line.match(new RegExp(`^${TEXT_DATE_RE.source}(.+)$`))
+  if (textMatch) {
+    const month = TURKISH_MONTHS[normalizeMonthName(textMatch[2])]
+    if (month) return { day: textMatch[1], month, year: textMatch[3], rest: textMatch[4] }
+  }
+
+  const numericMatch = line.match(new RegExp(`^${NUMERIC_DATE_RE.source}\\s+(.+)$`))
+  if (numericMatch) {
+    return { day: numericMatch[1], month: Number(numericMatch[2]), year: numericMatch[3], rest: numericMatch[4] }
+  }
+
+  return null
 }
 
 export async function extractPdfText(buffer: Buffer): Promise<string> {
@@ -71,76 +106,89 @@ export function parseStatementText(text: string): ParsedStatement {
   let period_year: number | null = null
 
   for (const line of lines) {
-    // Skip obvious header/footer noise
-    const lower = line.toLocaleLowerCase('tr-TR')
-
-    const totalMatch = /(toplam\s*bor[çc]|d[öo]nem\s*bor[çc]u|hesap\s*[öo]zeti\s*tutar[ıi]?)/i.test(line)
-      ? line.match(AMOUNT_RE)
-      : null
-    if (totalMatch && statement_total === null) {
-      statement_total = parseAmount(totalMatch[1])
-      continue
-    }
-
-    const minMatch = /asgari\s*[öo]deme/i.test(line) ? line.match(AMOUNT_RE) : null
-    if (minMatch && minimum_payment === null) {
-      minimum_payment = parseAmount(minMatch[1])
-      continue
-    }
-
-    const dueMatch = /son\s*[öo]deme\s*tarih/i.test(line) ? line.match(DATE_RE) : null
-    if (dueMatch && due_date === null) {
-      due_date = toIsoDate(dueMatch[1], dueMatch[2], dueMatch[3])
-      continue
-    }
-
-    if (/hesap\s*kesim\s*tarih/i.test(line) && period_month === null) {
-      const m = line.match(DATE_RE)
+    if (
+      statement_total === null &&
+      /(toplam\s*bor[çc]|d[öo]nem\s*bor[çc]u|hesap\s*[öo]zeti\s*tutar[ıi]?)/i.test(line)
+    ) {
+      const m = line.match(/(\d{1,3}(?:\.\d{3})*,\d{2})/)
       if (m) {
-        period_month = Number(m[2])
-        period_year = normalizeYear(m[3])
+        statement_total = parseAmount(m[1])
+        continue
       }
     }
 
-    if (
-      /^(sayfa|page|toplam|ara\s*toplam|devir|bakiye|iban|müşteri|musteri|hesap\s*no)/i.test(lower)
-    ) {
+    if (minimum_payment === null && /(asgari\s*[öo]deme|min\.?\s*[öo]deme)/i.test(line)) {
+      const m = line.match(/(\d{1,3}(?:\.\d{3})*,\d{2})/)
+      if (m) {
+        minimum_payment = parseAmount(m[1])
+        continue
+      }
+    }
+
+    if (due_date === null && /son\s*[öo]deme\s*tarih/i.test(line)) {
+      const d = extractDate(line)
+      if (d) {
+        due_date = d
+        continue
+      }
+    }
+
+    if (period_month === null && /hesap\s*kesim\s*tarih/i.test(line)) {
+      const d = extractDate(line)
+      if (d) {
+        const [y, m] = d.split('-')
+        period_year = Number(y)
+        period_month = Number(m)
+        continue
+      }
+    }
+
+    if (/^(sayfa|page|toplam|ara\s*toplam|devir|bakiye|iban|müşteri|musteri|hesap\s*no|ekstre\s*no|ekstre\s*sayfası)/i.test(line)) {
       continue
     }
 
-    const match = line.match(LINE_RE)
-    if (!match) continue
+    const dateMatch = matchTransactionLine(line)
+    if (!dateMatch) continue
 
-    const [, dd, mm, yyyy, descRaw, amountRaw, currencyRaw] = match
-    const installmentMatch = descRaw.match(INSTALLMENT_RE)
-    const installment_info = installmentMatch
-      ? `${installmentMatch[1] ?? installmentMatch[3]}/${installmentMatch[2] ?? installmentMatch[4]}`
-      : null
+    const tailMatch = dateMatch.rest.match(AMOUNT_TAIL_RE)
+    if (!tailMatch) continue
 
-    const description = descRaw.replace(INSTALLMENT_RE, '').replace(/\s{2,}/g, ' ').trim()
-    if (!description) continue
+    const amountRaw = tailMatch[1]
+    const sign = tailMatch[2]
+    const beforeTail = dateMatch.rest.slice(0, dateMatch.rest.length - tailMatch[0].length)
 
-    const amount = parseAmount(amountRaw)
-    if (Number.isNaN(amount) || amount === 0) continue
+    const installmentMatch = beforeTail.match(INSTALLMENT_RE)
+    const installment_info = installmentMatch ? `${installmentMatch[2]}/${installmentMatch[1]}` : null
+
+    const description = (installmentMatch ? beforeTail.replace(INSTALLMENT_RE, '') : beforeTail)
+      .replace(/\d{1,3}(?:\.\d{3})*,\d{2}\s*(TL|USD|EUR)?\s*$/i, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim()
+
+    if (!description || description.length < 2) continue
+
+    const magnitude = parseAmount(amountRaw)
+    if (Number.isNaN(magnitude) || magnitude === 0) continue
+    const amount = sign ? -Math.abs(magnitude) : magnitude
 
     let confidence_score = 1.0
-    if (!/^[A-ZÇĞİÖŞÜ0-9]/.test(description)) confidence_score -= 0.2
-    if (description.length < 3) confidence_score -= 0.3
+    if (description.length < 4) confidence_score -= 0.2
+    if (sign) confidence_score -= 0.1
     confidence_score = Math.max(0.3, Math.min(1, confidence_score))
 
     transactions.push({
-      transaction_date: toIsoDate(dd, mm, yyyy),
+      transaction_date: toIsoDate(dateMatch.day, dateMatch.month, dateMatch.year),
       description,
       amount,
-      currency: normalizeCurrency(currencyRaw),
+      currency: 'TRY',
       installment_info,
       confidence_score,
       raw_text: line,
     })
 
     if (period_month === null) {
-      period_month = Number(mm)
-      period_year = normalizeYear(yyyy)
+      period_month = dateMatch.month
+      period_year = normalizeYear(dateMatch.year)
     }
   }
 

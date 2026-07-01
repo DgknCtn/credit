@@ -15,7 +15,8 @@ const RULES: Rule[] = [
     category: 'Yemek',
     keywords: [
       'yemeksepeti', 'getir yemek', 'trendyol yemek', 'restoran', 'restaurant',
-      'cafe', 'kahve', 'starbucks', 'burger', 'pizza', 'lokanta', 'kebap', 'kokoreç',
+      'cafe', 'kafe', 'kahve', 'starbucks', 'burger', 'pizza', 'lokanta', 'kebap',
+      'kokoreç', 'fırın', 'firin', 'ekmek', 'pastane', 'bakery', 'simit',
     ],
   },
   {
@@ -36,7 +37,7 @@ const RULES: Rule[] = [
   {
     category: 'Abonelik',
     keywords: [
-      'netflix', 'spotify', 'youtube premium', 'apple.com/bill', 'google play',
+      'netflix', 'spotify', 'youtube', 'apple.com/bill', 'google play',
       'amazon prime', 'exxen', 'blutv', 'gain', 'icloud', 'disney+', 'playstation',
       'xbox', 'chatgpt', 'openai', 'claude.ai', 'anthropic',
     ],
@@ -75,15 +76,16 @@ const RULES: Rule[] = [
     category: 'Nakit / Finansal İşlemler',
     keywords: [
       'nakit avans', 'atm', 'para transferi', 'havale', 'eft', 'kredi kartı ödemesi',
-      'faiz', 'bsmv', 'komisyon',
+      'faiz', 'bsmv', 'komisyon', 'ödemeniz için teşekkür', 'ödemenize teşekkür',
     ],
   },
 ]
 
 function normalize(text: string): string {
-  return text
-    .toLocaleLowerCase('tr-TR')
-    .replace(/i̇/g, 'i')
+  // Plain toLowerCase(), not the tr-TR locale variant — the Turkish locale
+  // maps "I" -> "ı" (dotless), which breaks matches against ASCII brand
+  // keywords like "apple.com/bill" (would become "bıll").
+  return text.replace(/İ/g, 'i').toLowerCase()
 }
 
 export function guessCategory(description: string): Category {
