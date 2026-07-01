@@ -1,26 +1,192 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+@custom-variant dark (&:is(.dark *));
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-body);
+  --font-mono: "DM Mono", ui-monospace, monospace;
+  --font-heading: var(--font-display);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+:root {
+  /* Fonts */
+  --font-display: "Sora", ui-sans-serif, system-ui;
+  --font-body: "DM Sans", ui-sans-serif, system-ui;
+
+  /* Primitive tokens — Navy fintech palette */
+  --navy-950: #0A0F1E;
+  --navy-900: #0D1424;
+  --navy-800: #152035;
+  --navy-700: #1E2D47;
+  --navy-600: #2B3F5C;
+  --blue-600: #2563EB;
+  --blue-500: #3B7BFF;
+  --blue-400: #60A5FA;
+  --blue-100: #DBEAFE;
+  --emerald-600: #059669;
+  --emerald-500: #10B981;
+  --emerald-100: #D1FAE5;
+  --amber-500: #F59E0B;
+  --amber-100: #FEF3C7;
+  --red-600: #DC2626;
+  --red-100: #FEE2E2;
+  --slate-50: #F8FAFC;
+  --slate-100: #F1F5F9;
+  --slate-200: #E2E8F0;
+  --slate-300: #CBD5E1;
+  --slate-400: #94A3B8;
+  --slate-500: #64748B;
+  --slate-600: #475569;
+  --slate-700: #334155;
+  --slate-800: #1E293B;
+  --slate-900: #0F172A;
+
+  /* Semantic tokens */
+  --background: var(--slate-50);
+  --foreground: var(--slate-900);
+  --card: #FFFFFF;
+  --card-foreground: var(--slate-900);
+  --popover: #FFFFFF;
+  --popover-foreground: var(--slate-900);
+  --primary: var(--blue-600);
+  --primary-foreground: #FFFFFF;
+  --secondary: var(--slate-100);
+  --secondary-foreground: var(--slate-800);
+  --muted: var(--slate-100);
+  --muted-foreground: var(--slate-500);
+  --accent: var(--slate-100);
+  --accent-foreground: var(--slate-900);
+  --destructive: var(--red-600);
+  --success: var(--emerald-500);
+  --success-foreground: #FFFFFF;
+  --warning: var(--amber-500);
+  --border: var(--slate-200);
+  --input: var(--slate-200);
+  --ring: var(--blue-500);
+  --radius: 0.625rem;
+
+  /* Chart colors */
+  --chart-1: var(--blue-500);
+  --chart-2: var(--emerald-500);
+  --chart-3: var(--amber-500);
+  --chart-4: oklch(0.7 0.18 280);
+  --chart-5: oklch(0.65 0.18 12);
+
+  /* Sidebar — dark navy */
+  --sidebar: var(--navy-900);
+  --sidebar-foreground: #E2E8F0;
+  --sidebar-primary: var(--blue-500);
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: var(--navy-800);
+  --sidebar-accent-foreground: #FFFFFF;
+  --sidebar-border: var(--navy-700);
+  --sidebar-ring: var(--blue-500);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-body);
+    font-feature-settings: "ss01", "ss02";
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
+    font-feature-settings: "ss01";
+    letter-spacing: -0.02em;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* Tabular numbers for financial data */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Sidebar nav link */
+.nav-link {
+  @apply flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150;
+  color: var(--sidebar-foreground);
+  opacity: 0.7;
+}
+.nav-link:hover {
+  background: var(--sidebar-accent);
+  opacity: 1;
+}
+.nav-link.active {
+  background: var(--sidebar-accent);
+  color: #FFFFFF;
+  opacity: 1;
+}
+
+/* KPI card delta badge */
+.delta-positive {
+  @apply inline-flex items-center gap-1 text-xs font-medium px-1.5 py-0.5 rounded-md;
+  background: var(--emerald-100);
+  color: var(--emerald-600);
+}
+.delta-negative {
+  @apply inline-flex items-center gap-1 text-xs font-medium px-1.5 py-0.5 rounded-md;
+  background: var(--red-100);
+  color: var(--red-600);
+}
+.delta-neutral {
+  @apply inline-flex items-center gap-1 text-xs font-medium px-1.5 py-0.5 rounded-md;
+  background: var(--slate-100);
+  color: var(--slate-600);
+}
+
+/* Skeleton animation */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, var(--slate-200) 25%, var(--slate-100) 50%, var(--slate-200) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: var(--radius-md);
 }
